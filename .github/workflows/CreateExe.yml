@@ -1,0 +1,84 @@
+name: Build EXE (scan files head)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main, master ]
+    paths:
+      - "scan_files_head.py"             # ← замените на имя вашего файла
+      - "requirements.txt"
+      - ".github/workflows/build-exe-head.yml"
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+
+    env:
+      ENTRYPOINT: scan_files_head.py     # ← имя вашего скрипта (тот, что с авто-детектом кодировки)
+      APP_NAME: scan_files_head          # ← как назвать exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          IF EXIST requirements.txt (
+            pip install -r requirements.txt
+          ) ELSE (
+            REM базовый набор пакетов, если нет requirements.txt
+            pip install pyinstaller openpyxl tqdm xlrd charset-normalizer chardet
+          )
+
+      - name: Build with PyInstaller (console + collect hooks)
+        shell: cmd
+        run: |
+          REM --console для консольного окна (виден прогресс-бар)
+          REM --collect-all страхует сборку датасетов/подмодулей библиотек
+          pyinstaller ^
+            --onefile ^
+            --clean ^
+            --console ^
+            --name "%APP_NAME%" ^
+            --collect-all openpyxl ^
+            --collect-all xlrd ^
+            --collect-all charset_normalizer ^
+            --collect-all chardet ^
+            "%ENTRYPOINT%"
+
+      - name: Show build output
+        shell: bash
+        run: ls -la dist
+
+      - name: Upload artifact (EXE)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows
+          path: dist/${{ env.APP_NAME }}.exe
+
+      - name: Zip artifact (optional)
+        if: always()
+        shell: powershell
+        run: |
+          Compress-Archive -Path "dist\${{ env.APP_NAME }}.exe" -DestinationPath "dist\${{ env.APP_NAME }}-windows.zip" -Force
+
+      - name: Upload artifact (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-zip
+          path: dist/${{ env.APP_NAME }}-windows.zip
